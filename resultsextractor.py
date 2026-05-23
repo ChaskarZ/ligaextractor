@@ -5,6 +5,75 @@ from bs4 import BeautifulSoup
 from dataclasses import dataclass, field
 from typing import List, Optional
 import pandas as pd
+from enum import Enum
+
+
+class Ergebnis(str, Enum):
+
+    WHITE_WIN = "1-0"
+    BLACK_WIN = "0-1"
+
+    DRAW = "1/2-1/2"
+
+    WHITE_FORFEIT_WIN = "+--"
+    BLACK_FORFEIT_WIN = "--+"
+
+    DOUBLE_FORFEIT = "0-0"
+
+    @classmethod
+    def from_string(cls, value: str):
+
+        normalized = value.replace("½", "1/2").replace(" ", "")
+
+        mapping = {
+            "1-0": cls.WHITE_WIN,
+            "0-1": cls.BLACK_WIN,
+            "1/2-1/2": cls.DRAW,
+            "+--": cls.WHITE_FORFEIT_WIN,
+            "--+": cls.BLACK_FORFEIT_WIN,
+            "0-0": cls.DOUBLE_FORFEIT,
+        }
+
+        if normalized not in mapping:
+
+            raise ValueError(f"Unbekanntes Ergebnis: {value}")
+
+        return mapping[normalized]
+
+    def flipped(self):
+
+        mapping = {
+            Ergebnis.WHITE_WIN: Ergebnis.BLACK_WIN,
+            Ergebnis.BLACK_WIN: Ergebnis.WHITE_WIN,
+            Ergebnis.WHITE_FORFEIT_WIN: Ergebnis.BLACK_FORFEIT_WIN,
+            Ergebnis.BLACK_FORFEIT_WIN: Ergebnis.WHITE_FORFEIT_WIN,
+            Ergebnis.DRAW: Ergebnis.DRAW,
+            Ergebnis.DOUBLE_FORFEIT: Ergebnis.DOUBLE_FORFEIT,
+        }
+
+        return mapping[self]
+
+    def points_white(self):
+
+        mapping = {
+            Ergebnis.WHITE_WIN: 1.0,
+            Ergebnis.BLACK_WIN: 0.0,
+            Ergebnis.DRAW: 0.5,
+            Ergebnis.WHITE_FORFEIT_WIN: 1.0,
+            Ergebnis.BLACK_FORFEIT_WIN: 0.0,
+            Ergebnis.DOUBLE_FORFEIT: 0.0,
+        }
+
+        return mapping[self]
+
+    def points_black(self):
+
+        return 1.0 - self.points_white()
+
+    def __str__(self):
+
+        return self.value
+
 
 # ============================================================
 # Partie
@@ -40,19 +109,17 @@ class Partie:
         return {
             "Round": self.round_number,
             "Board": self.board_number,
-
             "White": self.white,
             "Black": self.black,
-
             "IDWhite": self.id_white,
             "IDBlack": self.id_black,
-
             "Result": self.result,
         }
 
     def to_dataframe(self):
 
         return pd.DataFrame([self.export()])
+
 
 # ============================================================
 # Mannschaftskampf
@@ -104,9 +171,7 @@ class Mannschaftskampf:
             # --------------------------------------------
 
             try:
-                board_number = int(
-                    cells[0].get_text(strip=True)
-                )
+                board_number = int(cells[0].get_text(strip=True))
             except:
                 continue
 
@@ -124,7 +189,7 @@ class Mannschaftskampf:
                 player_left = cells[2].get_text(strip=True)
                 player_right = cells[7].get_text(strip=True)
 
-                result = cells[10].get_text(strip=True)
+                raw_result = cells[10].get_text(strip=True)
 
             else:
 
@@ -133,7 +198,7 @@ class Mannschaftskampf:
                 player_left = cells[2].get_text(strip=True)
                 player_right = cells[6].get_text(strip=True)
 
-                result = cells[8].get_text(strip=True)
+                raw_result = cells[8].get_text(strip=True)
 
             # --------------------------------------------
             # DWZ IDs
@@ -149,15 +214,9 @@ class Mannschaftskampf:
                 href_left = dwz_links[0]["href"]
                 href_right = dwz_links[1]["href"]
 
-                match_left = re.search(
-                    r"zps=([\d\-]+)",
-                    href_left
-                )
+                match_left = re.search(r"zps=([\d\-]+)", href_left)
 
-                match_right = re.search(
-                    r"zps=([\d\-]+)",
-                    href_right
-                )
+                match_right = re.search(r"zps=([\d\-]+)", href_right)
 
                 if match_left:
                     id_left = match_left.group(1)
@@ -166,14 +225,10 @@ class Mannschaftskampf:
                     id_right = match_right.group(1)
 
             # --------------------------------------------
-            # Ergebnis normalisieren
+            # Ergebnis
             # --------------------------------------------
 
-            result = (
-                result
-                .replace("½", "1/2")
-                .replace(" ", "")
-            )
+            result = Ergebnis.from_string(raw_result)
 
             # --------------------------------------------
             # Farben
@@ -181,13 +236,21 @@ class Mannschaftskampf:
 
             if board_number % 2 == 1:
 
+                # Team A hat Schwarz
+
                 white = player_right
                 black = player_left
 
                 id_white = id_right
                 id_black = id_left
 
+                # Ergebnis umdrehen,
+                # da Ergebnis aus linker Sicht kommt
+                result = result.flipped()
+
             else:
+
+                # Team A hat Weiß
 
                 white = player_left
                 black = player_right
@@ -198,13 +261,10 @@ class Mannschaftskampf:
             partie = Partie(
                 round_number=round_number,
                 board_number=board_number,
-
                 white=white,
                 black=black,
-
                 id_white=id_white,
                 id_black=id_black,
-
                 result=result,
             )
 
@@ -230,6 +290,7 @@ class Mannschaftskampf:
 
         return pd.DataFrame(self.export())
 
+
 # ============================================================
 # Runde
 # ============================================================
@@ -239,9 +300,7 @@ class Mannschaftskampf:
 class Runde:
     round_number: int
 
-    mannschaftskaempfe: List[Mannschaftskampf] = field(
-        default_factory=list
-    )
+    mannschaftskaempfe: List[Mannschaftskampf] = field(default_factory=list)
 
     @classmethod
     def create_from_soup(
@@ -256,10 +315,7 @@ class Runde:
         # Rundentitel finden
         # --------------------------------------------------------
 
-        round_header = soup.find(
-            "th",
-            id=f"tr{round_number}"
-        )
+        round_header = soup.find("th", id=f"tr{round_number}")
 
         if round_header is None:
             return runde
@@ -314,16 +370,13 @@ class Runde:
             # Mannschaftskampf Header
             # --------------------------------------------
 
-            if "begegnung" in classes and \
-                    "mannschaftTop" not in classes:
+            if "begegnung" in classes and "mannschaftTop" not in classes:
 
                 # alten Kampf speichern
                 if current_header:
 
                     mk = Mannschaftskampf.create_from_rows(
-                        current_header,
-                        current_games,
-                        round_number
+                        current_header, current_games, round_number
                     )
 
                     if len(mk.partien) > 0:
@@ -338,20 +391,31 @@ class Runde:
             # Einzelpartie
             # --------------------------------------------
 
+            classes = row.get("class", [])
+
+            # mannschaftTop ignorieren
+            if "mannschaftTop" in classes:
+                continue
+
             cells = row.find_all("td")
 
-            # Zu wenige Spalten -> keine Partie
             if len(cells) < 8:
                 continue
 
-            # Erste Spalte muss Brettnummer sein
+            # Erste Zelle muss Brettnummer sein
             board_text = cells[0].get_text(strip=True)
 
             if not board_text.isdigit():
                 continue
 
-            current_games.append(row)
+            # Zusätzlich:
+            # echte Partiezeilen enthalten KEIN "DWZ"
+            row_text = row.get_text(" ", strip=True)
 
+            if "DWZ" in row_text:
+                continue
+
+            current_games.append(row)
         # --------------------------------------------------------
         # letzten Kampf speichern
         # --------------------------------------------------------
@@ -359,9 +423,7 @@ class Runde:
         if current_header:
 
             mk = Mannschaftskampf.create_from_rows(
-                current_header,
-                current_games,
-                round_number
+                current_header, current_games, round_number
             )
 
             if len(mk.partien) > 0:
@@ -394,6 +456,8 @@ class Runde:
         cols = ["Round"] + cols
 
         return df[cols]
+
+
 # ============================================================
 # Saison
 # ============================================================
@@ -415,10 +479,7 @@ class Saison:
 
         response.raise_for_status()
 
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser"
-        )
+        soup = BeautifulSoup(response.text, "html.parser")
 
         # ----------------------------------------------------
         # Saisonname
@@ -434,10 +495,7 @@ class Saison:
         # Rundenzahl bestimmen
         # ----------------------------------------------------
 
-        round_links = soup.find_all(
-            "a",
-            href=re.compile(r"runde=\d+")
-        )
+        round_links = soup.find_all("a", href=re.compile(r"runde=\d+"))
 
         round_numbers = []
 
@@ -445,19 +503,12 @@ class Saison:
 
             href = link.get("href", "")
 
-            match = re.search(
-                r"runde=(\d+)",
-                href
-            )
+            match = re.search(r"runde=(\d+)", href)
 
             if match:
-                round_numbers.append(
-                    int(match.group(1))
-                )
+                round_numbers.append(int(match.group(1)))
 
-        round_numbers = sorted(
-            list(set(round_numbers))
-        )
+        round_numbers = sorted(list(set(round_numbers)))
 
         # ----------------------------------------------------
         # Runden laden
@@ -467,10 +518,7 @@ class Saison:
 
             print(f"Lade Runde {round_number}")
 
-            runde = Runde.create_from_soup(
-                soup,
-                round_number
-            )
+            runde = Runde.create_from_soup(soup, round_number)
 
             saison.runden.append(runde)
 
@@ -498,32 +546,20 @@ class Saison:
         preferred_order = [
             "Round",
             "Board",
-
             "TeamA",
             "TeamB",
-
             "White",
             "Black",
-
             "IDWhite",
             "IDBlack",
-
             "Result",
         ]
 
-        existing_cols = [
-            c for c in preferred_order
-            if c in df.columns
-        ]
+        existing_cols = [c for c in preferred_order if c in df.columns]
 
-        remaining_cols = [
-            c for c in df.columns
-            if c not in existing_cols
-        ]
+        remaining_cols = [c for c in df.columns if c not in existing_cols]
 
-        return df[
-            existing_cols + remaining_cols
-        ]
+        return df[existing_cols + remaining_cols]
 
     def to_csv(
         self,
@@ -533,19 +569,16 @@ class Saison:
 
         df = self.to_dataframe()
 
-        df.to_csv(
-            path,
-            sep=sep,
-            index=False,
-            encoding="utf-8"
-        )
+        df.to_csv(path, sep=sep, index=False, encoding="utf-8")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     saison = Saison.create_from_hyperlink(
-        'https://www.ligamanager.schachbund-bayern.de/bsb/ergebnisse/spielplan.htm?ligaId=2489')
-    saison.to_csv('saisontest.csv')
+        "https://www.ligamanager.schachbund-bayern.de/bsb/ergebnisse/spielplan.htm?ligaId=2489"
+    )
+    saison.to_csv("saisontest.csv")
     saison2 = Saison.create_from_hyperlink(
-        'https://www.ligamanager.schachbund-bayern.de/mfr-ost/ergebnisse/spielplan.htm?ligaId=2451')
-    saison2.to_csv('saison2test.csv')
+        "https://www.ligamanager.schachbund-bayern.de/mfr-ost/ergebnisse/spielplan.htm?ligaId=2451"
+    )
+    saison2.to_csv("saison2test.csv")
     print(saison2)
