@@ -1,1 +1,5 @@
 # ligaextractor
+
+## Requirements
+- BeautifulSoup
+- Pandas
